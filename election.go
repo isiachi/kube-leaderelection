@@ -6,14 +6,14 @@ import (
 	"sync"
 	"time"
 
-	api "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
-	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/kubernetes/pkg/api/legacyscheme"
 )
 
 // LeaderElector gives you leader election built on Kubernetes/etcd's APIs.
@@ -54,22 +54,20 @@ type Config struct {
 
 // NewLeaderElector creates a new leader elector instance. Takes an optional Config, by default the
 // hostname is for this node's identifier.
-func NewLeaderElector(args ...interface{}) (*LeaderElector, error) {
-	var config Config
-	if args == nil {
-		config = Config{}
-	} else {
-		config = args[0].(Config)
+func NewLeaderElector(configs ...Config) (*LeaderElector, error) {
+	config := Config{}
+	if configs != nil {
+		config = configs[0]
 	}
-	var err error
 	if config.NodeID == "" {
+		var err error
 		config.NodeID, err = os.Hostname()
 		if err != nil {
 			return nil, err
 		}
 	}
 	if config.Namespace == "" {
-		config.Namespace = api.NamespaceDefault
+		config.Namespace = corev1.NamespaceDefault
 	}
 	if config.LockName == "" {
 		config.LockName = "leader-election"
@@ -93,21 +91,21 @@ func NewLeaderElector(args ...interface{}) (*LeaderElector, error) {
 		return nil, err
 	}
 
-	clientset, err := kubernetes.NewForConfig(clientConfig)
+	clientSet, err := kubernetes.NewForConfig(clientConfig)
 	if err != nil {
 		return nil, err
 	}
 
 	broadcaster := record.NewBroadcaster()
-	broadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: v1core.New(clientset.CoreV1().RESTClient()).Events("")})
-	recorder := broadcaster.NewRecorder(legacyscheme.Scheme, api.EventSource{Component: config.ComponentName})
+	broadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: typedcorev1.New(clientSet.CoreV1().RESTClient()).Events("")})
+	recorder := broadcaster.NewRecorder(runtime.NewScheme(), corev1.EventSource{Component: config.ComponentName})
 
 	rl, err := resourcelock.New(
-		resourcelock.ConfigMapsResourceLock,
+		string(corev1.ResourceConfigMaps),
 		config.Namespace,
 		config.LockName,
-		clientset.CoreV1(),
-		clientset.CoordinationV1(),
+		clientSet.CoreV1(),
+		clientSet.CoordinationV1(),
 		resourcelock.ResourceLockConfig{
 			Identity:      config.NodeID,
 			EventRecorder: recorder,
